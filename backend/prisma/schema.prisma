@@ -1,0 +1,383 @@
+// RecipeShare — Prisma Schema
+// PostgreSQL with full-text search (GIN + trigram)
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearch"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── ENUMS ──────────────────────────────────────────────
+
+enum Role {
+  USER
+  ADMIN
+  MODERATOR
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+  EXPERT
+}
+
+enum RecipeStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+  FLAGGED
+}
+
+enum MealType {
+  BREAKFAST
+  LUNCH
+  DINNER
+  SNACK
+}
+
+enum ReportStatus {
+  PENDING
+  REVIEWED
+  DISMISSED
+  ACTION_TAKEN
+}
+
+enum NotificationType {
+  LIKE
+  COMMENT
+  FOLLOW
+  RECIPE_PUBLISHED
+  MENTION
+  SYSTEM
+}
+
+// ─── MODELS ─────────────────────────────────────────────
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  passwordHash  String?
+  name          String
+  bio           String?
+  avatar        String?
+  location      String?
+  role          Role     @default(USER)
+  emailVerified Boolean  @default(false)
+  verifyToken   String?
+  resetToken    String?
+  resetExpires  DateTime?
+  googleId      String?  @unique
+  facebookId    String?  @unique
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  recipes       Recipe[]
+  comments      Comment[]
+  likes         Like[]
+  bookmarks     Bookmark[]
+  ratings       Rating[]
+  collections   Collection[]
+  mealPlans     MealPlan[]
+  notifications Notification[]
+  reports       Report[]       @relation("Reporter")
+  auditLogs     AuditLog[]
+  followers     Follow[]       @relation("Following")
+  following     Follow[]       @relation("Follower")
+
+  @@index([email])
+  @@index([name])
+}
+
+model Recipe {
+  id             String       @id @default(uuid())
+  authorId       String
+  title          String
+  description    String?
+  prepTime       Int?         // minutes
+  cookTime       Int?         // minutes
+  servings       Int          @default(4)
+  difficulty     Difficulty   @default(EASY)
+  cuisine        String?
+  privacy        Boolean      @default(false)
+  status         RecipeStatus @default(DRAFT)
+  version        Int          @default(1)
+  averageRating  Float        @default(0)
+  likesCount     Int          @default(0)
+  commentsCount  Int          @default(0)
+  viewCount      Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  author         User           @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  ingredients    Ingredient[]
+  steps          Step[]
+  images         RecipeImage[]
+  tags           RecipeTag[]
+  categories     RecipeCategory[]
+  comments       Comment[]
+  likes          Like[]
+  bookmarks      Bookmark[]
+  ratings        Rating[]
+  versions       RecipeVersion[]
+  collectionItems CollectionRecipe[]
+  mealPlans      MealPlan[]
+
+  @@index([authorId])
+  @@index([status])
+  @@index([cuisine])
+  @@index([difficulty])
+  @@index([createdAt])
+  @@index([likesCount])
+  @@index([averageRating])
+}
+
+model RecipeVersion {
+  id        String   @id @default(uuid())
+  recipeId  String
+  version   Int
+  data      Json     // full recipe snapshot
+  changelog String?
+  createdAt DateTime @default(now())
+
+  recipe    Recipe   @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  @@unique([recipeId, version])
+}
+
+model Ingredient {
+  id         String @id @default(uuid())
+  recipeId   String
+  name       String
+  quantity   Float?
+  unit       String?
+  notes      String?
+  orderIndex Int    @default(0)
+
+  recipe     Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  @@index([recipeId])
+}
+
+model Step {
+  id           String  @id @default(uuid())
+  recipeId     String
+  instruction  String
+  imageUrl     String?
+  timerMinutes Int?
+  orderIndex   Int     @default(0)
+
+  recipe       Recipe  @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  @@index([recipeId])
+}
+
+model RecipeImage {
+  id           String  @id @default(uuid())
+  recipeId     String
+  url          String
+  thumbnailUrl String?
+  mediumUrl    String?
+  blurHash     String?
+  isPrimary    Boolean @default(false)
+  orderIndex   Int     @default(0)
+
+  recipe       Recipe  @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  @@index([recipeId])
+}
+
+model Tag {
+  id      String      @id @default(uuid())
+  name    String      @unique
+  recipes RecipeTag[]
+
+  @@index([name])
+}
+
+model RecipeTag {
+  recipeId String
+  tagId    String
+
+  recipe   Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  tag      Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([recipeId, tagId])
+}
+
+model Category {
+  id      String           @id @default(uuid())
+  name    String           @unique
+  slug    String           @unique
+  icon    String?
+  recipes RecipeCategory[]
+
+  @@index([slug])
+}
+
+model RecipeCategory {
+  recipeId   String
+  categoryId String
+
+  recipe     Recipe   @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([recipeId, categoryId])
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  recipeId  String
+  userId    String
+  parentId  String?
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  recipe    Recipe   @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent    Comment? @relation("CommentReplies", fields: [parentId], references: [id], onDelete: SetNull)
+  replies   Comment[] @relation("CommentReplies")
+
+  @@index([recipeId])
+  @@index([userId])
+  @@index([parentId])
+}
+
+model Like {
+  id        String   @id @default(uuid())
+  recipeId  String
+  userId    String
+  createdAt DateTime @default(now())
+
+  recipe    Recipe   @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([recipeId, userId])
+}
+
+model Bookmark {
+  id        String   @id @default(uuid())
+  recipeId  String
+  userId    String
+  createdAt DateTime @default(now())
+
+  recipe    Recipe   @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([recipeId, userId])
+}
+
+model Rating {
+  id        String   @id @default(uuid())
+  recipeId  String
+  userId    String
+  value     Int      // 1-5
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  recipe    Recipe   @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([recipeId, userId])
+}
+
+model Follow {
+  id          String   @id @default(uuid())
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+
+  follower    User     @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User     @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+}
+
+model Collection {
+  id          String             @id @default(uuid())
+  userId      String
+  name        String
+  description String?
+  isPublic    Boolean            @default(true)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recipes     CollectionRecipe[]
+
+  @@index([userId])
+}
+
+model CollectionRecipe {
+  collectionId String
+  recipeId     String
+  addedAt      DateTime @default(now())
+
+  collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  recipe       Recipe     @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  @@id([collectionId, recipeId])
+}
+
+model MealPlan {
+  id       String   @id @default(uuid())
+  userId   String
+  recipeId String
+  date     DateTime
+  mealType MealType
+  servings Int      @default(2)
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recipe   Recipe   @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType
+  data      Json             // { actorId, recipeId, commentId, etc. }
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+  @@index([createdAt])
+}
+
+model Report {
+  id         String       @id @default(uuid())
+  reporterId String
+  targetType String       // "recipe" | "comment" | "user"
+  targetId   String
+  reason     String
+  details    String?
+  status     ReportStatus @default(PENDING)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  reporter   User         @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([targetType, targetId])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  adminId   String
+  action    String
+  details   Json?
+  createdAt DateTime @default(now())
+
+  admin     User     @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId])
+  @@index([createdAt])
+}
