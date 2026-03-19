@@ -1,0 +1,8 @@
+Error: P1001: Can't reach database server at `ep-weathered-cloud-ado1ubju-pooler.c-2.us-east-1.aws.neon.tech:5432`
+
+Please make sure your database server is running at `ep-weathered-cloud-ado1ubju-pooler.c-2.us-east-1.aws.neon.tech:5432`.
+
+Environment variables loaded from .env
+Prisma schema loaded from prisma\schema.prisma
+Datasource "db": PostgreSQL database "neondb", schema "public" at "ep-weathered-cloud-ado1ubju-pooler.c-2.us-east-1.aws.neon.tech"
+
